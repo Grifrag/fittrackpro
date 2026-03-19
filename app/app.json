@@ -11,7 +11,9 @@
       "resizeMode": "contain",
       "backgroundColor": "#1F4E79"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "gr.fittrackpro.app",
@@ -26,7 +28,8 @@
       "versionCode": 1,
       "permissions": [
         "android.permission.CAMERA",
-        "android.permission.INTERNET"
+        "android.permission.INTERNET",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -35,14 +38,17 @@
     "plugins": [
       [
         "expo-camera",
-        { "cameraPermission": "Επιτρέψτε στο FitTrack Pro να χρησιμοποιεί την κάμερα για σάρωση barcodes." }
+        {
+          "cameraPermission": "Επιτρέψτε στο FitTrack Pro να χρησιμοποιεί την κάμερα για σάρωση barcodes."
+        }
       ]
     ],
     "scheme": "fittrackpro",
     "extra": {
       "eas": {
-        "projectId": "YOUR_EAS_PROJECT_ID"
+        "projectId": "2a54f1fb-1384-49ad-b51a-30585226e0bf"
       }
-    }
+    },
+    "owner": "grifrag"
   }
 }
