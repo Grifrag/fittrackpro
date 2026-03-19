@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // ⚠️ Change this to your deployed backend URL in production
 export const API_BASE_URL = __DEV__
   ? 'http://localhost:3000/api'
-  : 'https://your-production-url.com/api';
+  : 'https://api-production-cead.up.railway.app/api';
 
 const api = axios.create({ baseURL: API_BASE_URL, timeout: 10000 });
 
