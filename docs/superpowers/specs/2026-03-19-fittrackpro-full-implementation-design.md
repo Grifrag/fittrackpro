@@ -37,13 +37,23 @@ FitTrackPro is a Greek-language fitness/calorie tracking mobile app (React Nativ
 
 - `POST /api/payments/create-checkout` (protected)
   - Creates Stripe Checkout Session ($40, mode: payment)
+  - **MUST set** `metadata: { userId: req.user.id }` on the session — required so the webhook can identify the user
   - Returns `{ url }` → app opens WebView
-- `POST /api/webhooks/stripe` (public, raw body)
-  - Verifies Stripe signature
-  - On `checkout.session.completed` → UPDATE users SET lifetime_access=true, subscription_tier='lifetime' WHERE id = metadata.userId
+
+- `POST /api/webhooks/stripe` (public, raw body — `express.raw({ type: 'application/json' })`)
+  - Verifies Stripe signature with `stripe.webhooks.constructEvent`
+  - On `checkout.session.completed` → `UPDATE users SET lifetime_access=true, subscription_tier='lifetime' WHERE id = $1` using `session.metadata.userId`
   - Returns 200 immediately
 
-**New file:** `backend/routes/payments.js` registers in `server.js`.
+**server.js ordering (CRITICAL):** The webhook route `/api/webhooks/stripe` must be registered with `express.raw()` BEFORE the global `express.json()` middleware, otherwise Stripe signature verification will fail silently.
+
+```js
+// CORRECT order in server.js:
+app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), stripeWebhookHandler);
+app.use(express.json()); // global json parser AFTER webhook route
+```
+
+**New npm dependency:** Add `"stripe": "^14.x"` to `backend/package.json` dependencies.
 
 **Environment variables needed:**
 ```
@@ -54,10 +64,15 @@ STRIPE_PRICE_ID=price_...   # $40 one-time price created in Stripe dashboard
 
 ### 3.2 Security Fixes
 
-- **CORS:** Replace `origin: '*'` with `origin: process.env.ALLOWED_ORIGINS` (comma-separated list)
-- **Rate limiting:** Add `express-rate-limit` to auth routes (5 requests/15 min per IP)
-- **Helmet:** Add `helmet()` middleware for security headers
-- **Stripe webhook:** Use `express.raw()` only for `/api/webhooks/stripe`; rest keep `express.json()`
+- **CORS:** Replace `origin: '*'` with:
+  ```js
+  origin: (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim())
+  ```
+  The `cors` package does not parse comma-separated strings natively — must split manually.
+- **Rate limiting:** Add `express-rate-limit` specifically to `/api/auth/*` routes (5 requests/15 min per IP). This stacks narrowly on top of the existing global 100 req/15 min limiter — the auth limiter is more restrictive and takes effect first for auth routes only.
+- **Helmet:** Add `helmet()` middleware for security headers (before routes)
+- **Stripe webhook:** `express.raw()` for `/api/webhooks/stripe` registered BEFORE global `express.json()` (see 3.1)
+- **New npm dependencies:** `"helmet": "^7.x"`, `"express-rate-limit": "^7.x"`
 
 ### 3.3 Recipes API (complete what's missing)
 
@@ -66,12 +81,25 @@ STRIPE_PRICE_ID=price_...   # $40 one-time price created in Stripe dashboard
 - `POST /api/recipes` — create recipe with ingredients
 - `GET /api/recipes/:id` — get recipe detail with calculated macros
 
+**Note:** The workout backend route (`POST /api/progress/workout`) already exists in `backend/routes/progress.js`. Do NOT rebuild it. Only the frontend UI is missing (see 4.2).
+
+**New endpoint needed:** `GET /api/progress/workouts` — returns last N workout logs for the authenticated user. This does NOT currently exist and must be added to `backend/routes/progress.js`.
+
+### 3.4 Schema Fix
+
+**CRITICAL:** `backend/db/schema.sql` is missing a UNIQUE constraint on `progress_logs`. The existing `progress.js` route uses `ON CONFLICT (user_id, log_date)` which will crash without it. Add:
+```sql
+ALTER TABLE progress_logs ADD CONSTRAINT progress_logs_user_date_unique UNIQUE (user_id, log_date);
+```
+Also create a migration file `backend/db/migrations/001_add_progress_logs_unique.sql` with this statement.
+
 ### 3.4 Environment Config
 
 **Update** `.env.example` with all required variables:
 ```
 DATABASE_URL=postgresql://...
 JWT_SECRET=...
+JWT_EXPIRES_IN=30d
 STRIPE_SECRET_KEY=sk_live_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 STRIPE_PRICE_ID=price_...
@@ -79,27 +107,35 @@ ALLOWED_ORIGINS=https://yourdomain.github.io,exp://...
 PORT=3000
 ```
 
+Note: `JWT_EXPIRES_IN` is already used in `auth.js` (`process.env.JWT_EXPIRES_IN`) but was missing from `.env.example`. Without it, tokens never expire.
+
 ---
 
 ## 4. Mobile App Implementation
 
 ### 4.1 Stripe Payment Screen
 
-**New file:** `app/src/screens/PaymentScreen.js`
-- WebView that opens the Stripe Checkout URL returned from backend
-- Detects redirect to success/cancel URL
-- On success: calls `GET /api/auth/me` to refresh user → shows "Lifetime Access" badge
-- On cancel: shows message and returns to Profile
+**New file:** `app/src/screens/PaymentScreen.js` (located at `app/src/screens/` — same dir as all other screens)
+- Uses `react-native-webview@13.x` (compatible with Expo SDK ~51 managed workflow — pin this version)
+- WebView opens Stripe Checkout URL from backend
+- Detects redirect to `fittrackpro://payment/success` or `fittrackpro://payment/cancel` via `onNavigationStateChange`
+- On success:
+  1. Call `GET /api/auth/me` (using existing auth token)
+  2. Call `setUser(updatedUser)` on the AuthContext (context exposes a `setUser` function — add this if missing)
+  3. Navigate back to Profile screen with success toast
+- On cancel: show alert and navigate back
+
+**AuthContext change:** Add `setUser` to the context value export so PaymentScreen can update global user state without re-login.
 
 **Trigger:** Button on ProfileScreen "Αγόρασε Lifetime Access — €40" (shown only if `!user.lifetime_access`)
 
 ### 4.2 Workout Screen
 
-**New file:** `app/src/screens/WorkoutScreen.js`
-- Form: workout type (dropdown), duration (minutes), calories burned (optional)
-- Submit → `POST /api/progress/workout`
-- History list below the form (last 7 workouts)
-- Added to bottom tab navigation
+**New file:** `app/src/screens/WorkoutScreen.js` (at `app/src/screens/`)
+- Form: workout type (dropdown: Τρέξιμο/Ποδήλατο/Κολύμπι/Βάρη/Άλλο), duration (minutes), calories burned (optional)
+- Submit → `POST /api/progress/workout` (this endpoint ALREADY EXISTS in backend — do not recreate)
+- History list below the form → `GET /api/progress/workouts` (NEW endpoint — must be added to backend)
+- Added to bottom tab navigation (5th tab)
 
 ### 4.3 Privacy Policy Screen
 
@@ -134,11 +170,15 @@ PORT=3000
 {
   "build": {
     "production": {
+      "android": { "buildType": "app-bundle" }
+    },
+    "preview": {
       "android": { "buildType": "apk" }
     }
   }
 }
 ```
+Note: Google Play requires `.aab` (Android App Bundle) for new submissions. Use `buildType: "app-bundle"` for production. The `preview` profile uses `apk` for local testing.
 
 ---
 
@@ -254,11 +294,12 @@ Forums → Landing Page (GitHub Pages) → Stripe Payment Link OR Google Play
 ### New Files
 - `backend/routes/payments.js` — Stripe checkout + webhook
 - `backend/routes/recipes.js` — Recipes CRUD
-- `app/src/screens/PaymentScreen.js` — Stripe WebView
-- `app/src/screens/WorkoutScreen.js` — Workout logging UI
-- `app/src/screens/PrivacyPolicyScreen.js` — Privacy policy
+- `backend/db/migrations/001_add_progress_logs_unique.sql` — Schema fix for UNIQUE constraint
+- `app/src/screens/PaymentScreen.js` — Stripe WebView (at `app/src/screens/`)
+- `app/src/screens/WorkoutScreen.js` — Workout logging UI (at `app/src/screens/`)
+- `app/src/screens/PrivacyPolicyScreen.js` — Privacy policy (at `app/src/screens/`)
 - `app/app.json` — Expo config
-- `app/eas.json` — EAS build config
+- `app/eas.json` — EAS build config (aab for production, apk for preview)
 - `landing/index.html` — Landing page
 - `landing/privacy.html` — Privacy policy page
 - `landing/style.css` — Styles
@@ -266,12 +307,15 @@ Forums → Landing Page (GitHub Pages) → Stripe Payment Link OR Google Play
 - `forum-posts.md` — Ready-to-post marketing copy
 
 ### Modified Files
-- `backend/server.js` — Add payments route, helmet, rate limiting, fix CORS, raw body for webhook
-- `backend/package.json` — Add stripe, helmet, express-rate-limit
-- `backend/.env.example` — Add all Stripe variables
+- `backend/server.js` — Register webhook BEFORE express.json(); add payments route, helmet, rate limiting, fix CORS
+- `backend/routes/progress.js` — Add `GET /api/progress/workouts` endpoint
+- `backend/package.json` — Add `stripe@^14`, `helmet@^7`, `express-rate-limit@^7`
+- `backend/db/schema.sql` — Add UNIQUE constraint on progress_logs(user_id, log_date)
+- `backend/.env.example` — Add JWT_EXPIRES_IN + all Stripe variables
+- `app/src/context/AuthContext.js` — Export `setUser` function in context value
 - `app/src/screens/ProfileScreen.js` — Add "Buy Lifetime" button + Privacy Policy link
-- `app/src/navigation/index.js` — Add Workout + Privacy Policy + Payment screens
-- `app/package.json` — Add react-native-webview
+- `app/src/navigation/index.js` — Add Workout + Privacy Policy + Payment screens as tabs/stack
+- `app/package.json` — Add `react-native-webview@13.x`
 
 ---
 
