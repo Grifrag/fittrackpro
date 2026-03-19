@@ -25,7 +25,7 @@
         "backgroundColor": "#1F4E79"
       },
       "package": "gr.fittrackpro.app",
-      "versionCode": 1,
+      "versionCode": 2,
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.INTERNET",
@@ -39,7 +39,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Επιτρέψτε στο FitTrack Pro να χρησιμοποιεί την κάμερα για σάρωση barcodes."
+          "cameraPermission": "\u0395\u03c0\u03b9\u03c4\u03c1\u03ad\u03c8\u03c4\u03b5 \u03c3\u03c4\u03bf FitTrack Pro \u03bd\u03b1 \u03c7\u03c1\u03b7\u03c3\u03b9\u03bc\u03bf\u03c0\u03bf\u03b9\u03b5\u03af \u03c4\u03b7\u03bd \u03ba\u03ac\u03bc\u03b5\u03c1\u03b1 \u03b3\u03b9\u03b1 \u03c3\u03ac\u03c1\u03c9\u03c3\u03b7 barcodes."
         }
       ]
     ],
